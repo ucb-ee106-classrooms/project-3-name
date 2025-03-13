@@ -248,9 +248,45 @@ class DeadReckoning(Estimator):
 
     def update(self, _):
         if len(self.x_hat) > 0 and self.x_hat[-1][0] < self.x[-1][0]:
-            # TODO: Your implementation goes here!
-            # You may ONLY use self.u and self.x[0] for estimation
-            raise NotImplementedError
+            # Get the latest state estimate and time
+            last_state = self.x_hat[-1]
+            current_time = self.x[-1][0]
+            
+            # Latest input
+            latest_input = None
+            for u_data in reversed(self.u):
+                if u_data[0] <= current_time:
+                    latest_input = u_data
+                    break
+            
+            if latest_input is None:
+                self.x_hat.append(last_state)
+                return
+            
+            # Input
+            u_L = latest_input[1]
+            u_R = latest_input[2]
+            
+            # Last estimated state
+            last_time = last_state[0]
+            phi = last_state[1]
+            x_pos = last_state[2]
+            y_pos = last_state[3]
+            theta_L = last_state[4]
+            theta_R = last_state[5]
+            
+            dt = current_time - last_time
+            
+            # Unicycle model: x[t+1] = x[t] + f(x[t], u[t]) * dt
+            new_phi = phi + (self.r / (2 * self.d)) * (u_R - u_L) * dt
+            new_x = x_pos + (self.r / 2) * (u_L + u_R) * np.cos(phi) * dt
+            new_y = y_pos + (self.r / 2) * (u_L + u_R) * np.sin(phi) * dt
+            new_theta_L = theta_L + u_L * dt
+            new_theta_R = theta_R + u_R * dt
+            
+            # New state estimate
+            new_state = [current_time, new_phi, new_x, new_y, new_theta_L, new_theta_R]
+            self.x_hat.append(new_state)
 
 
 class KalmanFilter(Estimator):
