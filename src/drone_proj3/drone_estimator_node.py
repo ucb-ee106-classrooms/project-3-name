@@ -44,12 +44,12 @@ def main():
     estimator_type = args.estimator
     if estimator_type == 'oracle':
         estimator = OracleObserver(is_noisy=True)
-    elif estimator_type == 'dr':
+    elif estimator_type == 'dead_reckoning':
         estimator = DeadReckoning(is_noisy=True)
-    elif estimator_type == 'kf':
+    elif estimator_type == 'kalman_filter':
         raise RuntimeError(
             f'Estimator type: {estimator_type} is not supported for the quadrotor!')
-    elif estimator_type == 'ekf':
+    elif estimator_type == 'extended_kalman_filter':
         estimator = ExtendedKalmanFilter(is_noisy=True)
     else:
         raise RuntimeError(

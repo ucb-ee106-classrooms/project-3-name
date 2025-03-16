@@ -251,6 +251,7 @@ class DeadReckoning(Estimator):
             # Get the latest state estimate and time
             last_state = self.x_hat[-1]
             current_time = self.x[-1][0]
+            last_time = last_state[0]
             
             # Latest input
             latest_input = None
@@ -268,13 +269,11 @@ class DeadReckoning(Estimator):
             u_R = latest_input[2]
             
             # Last estimated state
-            last_time = last_state[0]
             phi = last_state[1]
             x_pos = last_state[2]
             y_pos = last_state[3]
             theta_L = last_state[4]
             theta_R = last_state[5]
-            
             dt = current_time - last_time
             
             # Unicycle model: x[t+1] = x[t] + f(x[t], u[t]) * dt
@@ -315,17 +314,86 @@ class KalmanFilter(Estimator):
         super().__init__()
         self.canvas_title = 'Kalman Filter'
         self.phid = np.pi / 4
-        # TODO: Your implementation goes here!
-        # You may define the A, C, Q, R, and P matrices below.
+        
+        # State: [x, y, theta_L, theta_R]
+        self.A = np.eye(4)
+
+        self.B = np.array([
+            [self.r/2 * np.cos(self.phid), self.r/2 * np.cos(self.phid)],
+            [self.r/2 * np.sin(self.phid), self.r/2 * np.sin(self.phid)],
+            [1, 0],
+            [0, 1]
+        ])
+
+        self.C = np.array([
+            [1, 0, 0, 0],
+            [0, 1, 0, 0]
+        ])
+
+        # Tuning Q, R, and P0
+        self.Q = np.array([
+            [0.001, 0, 0, 0],
+            [0, 0.001, 0, 0],
+            [0, 0, 0.001, 0],
+            [0, 0, 0, 0.001]
+        ])
+
+        self.R = np.array([
+            [0.01, 0],
+            [0, 0.01]
+        ])
+
+        self.P = np.array([
+            [0.1, 0, 0, 0],
+            [0, 0.1, 0, 0],
+            [0, 0, 0.1, 0],
+            [0, 0, 0, 0.1]
+        ])
 
     # noinspection DuplicatedCode
-    # noinspection PyPep8Naming
+    # noinspection PyPep8Naming    
     def update(self, _):
         if len(self.x_hat) > 0 and self.x_hat[-1][0] < self.x[-1][0]:
-            # TODO: Your implementation goes here!
-            # You may use self.u, self.y, and self.x[0] for estimation
-            raise NotImplementedError
-
+            last_state = self.x_hat[-1]
+            current_time = self.x[-1][0]
+            last_time = last_state[0]
+            
+            # Latest y (measurement) and u (input)
+            latest_y = None
+            for y_data in reversed(self.y):
+                if y_data[0] <= current_time:
+                    latest_y = y_data
+                    break
+            
+            latest_u = None
+            for u_data in reversed(self.u):
+                if u_data[0] <= current_time:
+                    latest_u = u_data
+                    break
+            
+            if latest_y is None or latest_u is None:
+                self.x_hat.append(last_state)
+                return
+            
+            # x, dt, u, and y
+            x_hat = np.array([last_state[2], last_state[3], last_state[4], last_state[5]])
+            dt = current_time - last_time
+            u = np.array([latest_u[1], latest_u[2]])
+            y = np.array([latest_y[1], latest_y[2]])
+            
+            # Kalman Filter prediction step
+            x_pred = self.A.dot(x_hat) + self.B.dot(u) * dt  # State extrapolation
+            P_pred = self.A.dot(self.P).dot(self.A.T) + self.Q  # Covariance extrapolation
+            
+            S = self.C.dot(P_pred).dot(self.C.T) + self.R
+            K = P_pred.dot(self.C.T).dot(np.linalg.inv(S))  # Kalman gain
+            
+            x_new = x_pred + K.dot(y - self.C.dot(x_pred))  # State Update
+            self.P = (np.eye(4) - K.dot(self.C)).dot(P_pred)  # Covariance Update
+            
+            # New state estimate
+            new_state = [current_time, self.phid, x_new[0], x_new[1], x_new[2], x_new[3]]
+            self.x_hat.append(new_state)
 
 # noinspection PyPep8Naming
 class ExtendedKalmanFilter(Estimator):
