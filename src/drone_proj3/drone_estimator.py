@@ -264,30 +264,166 @@ class ExtendedKalmanFilter(Estimator):
     def __init__(self, is_noisy=False):
         super().__init__(is_noisy)
         self.canvas_title = 'Extended Kalman Filter'
-        # TODO: Your implementation goes here!
-        # You may define the Q, R, and P matrices below.
+
         self.A = None
         self.B = None
         self.C = None
-        self.Q = None
-        self.R = None
-        self.P = None
+
+        self.Q = np.array([
+            [0.01, 0, 0, 0, 0, 0],
+            [0, 0.01, 0, 0, 0, 0],
+            [0, 0, 0.01, 0, 0, 0],
+            [0, 0, 0, 0.1, 0, 0],
+            [0, 0, 0, 0, 0.1, 0],
+            [0, 0, 0, 0, 0, 0.1]
+            ])
+
+        self.R = np.array([
+            [0.1, 0],
+            [0, 0.001]
+            ])
+        
+        self.P = np.array([
+            [0.1, 0, 0, 0, 0, 0],
+            [0, 0.1, 0, 0, 0, 0],
+            [0, 0, 0.1, 0, 0, 0],
+            [0, 0, 0, 0.1, 0, 0],
+            [0, 0, 0, 0, 0.1, 0],
+            [0, 0, 0, 0, 0, 0.1]
+            ])
 
     # noinspection DuplicatedCode
     def update(self, i):
         if len(self.x_hat) > 0: #and self.x_hat[-1][0] < self.x[-1][0]:
-            # TODO: Your implementation goes here!
-            # You may use self.u, self.y, and self.x[0] for estimation
-            raise NotImplementedError
+
+            # State extrapolation
+            last_state = self.x_hat[-1]
+            u = self.u[i]
+            x_pred = self.g(last_state, u)
+            
+            # Dynamics linearization - compute Jacobian A
+            A = self.approx_A(last_state, u)
+            
+            # Covariance extrapolation
+            P_pred = A @ self.P @ A.T + self.Q
+            
+            # Measurement linearization - compute Jacobian C
+            C = self.approx_C(x_pred)
+            
+            # Kalman gain
+            K = P_pred @ C.T @ np.linalg.inv(C @ P_pred @ C.T + self.R)
+            
+            # State update
+            x_updated = x_pred + K @ (self.y[i] - self.h(x_pred))
+            
+            # Covariance update
+            I = np.eye(len(self.P))
+            self.P = (I - K @ C) @ P_pred
+            
+            # New state estimate
+            self.x_hat.append(x_updated)
 
     def g(self, x, u):
-        raise NotImplementedError
+        """
+        Dynamics model function for the planar quadrotor.
+        
+        Parameters:
+        x : current state [x, z, phi, vx, vz, omega]
+        u : control input [u1 (thrust), u2 (moment)]
+        
+        Returns:
+        The predicted next state using forward Euler integration
+        """
+        A = np.array([x[3], x[4], x[5], 0, -self.gr, 0])
 
-    def h(self, x, y_obs):
-        raise NotImplementedError
+        phi = x[2]
+        B = np.array([[0,             0],
+                    [0,             0],
+                    [0,             0],
+                    [-np.sin(phi)/self.m, 0],
+                    [np.cos(phi)/self.m,  0],
+                    [0,             1/self.J]])
+        
+        x_dot = A + B @ u 
+        
+        x_new = x + x_dot * self.dt
+        
+        return x_new
+
+
+    def h(self, x):
+        """
+        Measurement model function.
+        
+        Parameters:
+        x : state [x, z, phi, vx, vz, omega]
+        
+        Returns:
+        The predicted measurement [distance to landmark, bearing]
+        """
+        # drone state
+        drone_x = x[0]
+        drone_z = x[1]
+        drone_phi = x[2]
+        
+        # landmark position
+        landmark_x = self.landmark[0]
+        landmark_z = self.landmark[2]
+        
+        distance = np.sqrt((landmark_x - drone_x)**2 + (landmark_z - drone_z)**2)
+        
+        return np.array([distance, drone_phi])
 
     def approx_A(self, x, u):
-        raise NotImplementedError
+        """
+        Approximate the Jacobian matrix A of the dynamics model at the current state.
+        
+        Parameters:
+        x : current state
+        u : control input
+        
+        Returns:
+        The linearized dynamics matrix A
+        """
+        phi = x[2]
+        u1 = u[0] # thrust force
+        
+        A = np.array([
+            [0, 0, 0, 1, 0, 0],
+            [0, 0, 0, 0, 1, 0],
+            [0, 0, 0, 0, 0, 1],
+            [0, 0, -u1 * np.cos(phi) / self.m, 0, 0, 0],
+            [0, 0, -u1 * np.sin(phi) / self.m, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0]
+        ])
+        
+        return A * self.dt
+
     
     def approx_C(self, x):
-        raise NotImplementedError
+        """
+        Approximate the Jacobian matrix C of the measurement model at the current state.
+        
+        Parameters:
+        x : current state
+        
+        Returns:
+        The linearized measurement matrix C
+        """
+        # drone state
+        drone_x = x[0]
+        drone_z = x[1]
+        
+        # landmark position
+        landmark_x = self.landmark[0]
+        landmark_y = self.landmark[1]
+        landmark_z = self.landmark[2]
+        
+        dx = landmark_x - drone_x
+        dz = landmark_z - drone_z
+        distance = np.sqrt(dx**2 + dz**2)
+        
+        C = np.array([[-dx / distance, -dz / distance, 0, 0, 0, 0],
+                     [0, 0, 1, 0, 0, 0]])
+        
+        return C * self.dt
