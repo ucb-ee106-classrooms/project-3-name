@@ -302,13 +302,13 @@ class ExtendedKalmanFilter(Estimator):
             x_pred = self.g(last_state, u)
             
             # Dynamics linearization - compute Jacobian A
-            A = self.approx_A(last_state, u)
+            A = self.A(last_state, u)
             
             # Covariance extrapolation
             P_pred = A @ self.P @ A.T + self.Q
             
             # Measurement linearization - compute Jacobian C
-            C = self.approx_C(x_pred)
+            C = self.C(x_pred)
             
             # Kalman gain
             K = P_pred @ C.T @ np.linalg.inv(C @ P_pred @ C.T + self.R)
@@ -337,12 +337,12 @@ class ExtendedKalmanFilter(Estimator):
         A = np.array([x[3], x[4], x[5], 0, -self.gr, 0])
 
         phi = x[2]
-        B = np.array([[0,             0],
-                    [0,             0],
-                    [0,             0],
+        B = np.array([[0, 0],
+                    [0, 0],
+                    [0, 0],
                     [-np.sin(phi)/self.m, 0],
                     [np.cos(phi)/self.m,  0],
-                    [0,             1/self.J]])
+                    [0, 1/self.J]])
         
         x_dot = A + B @ u 
         
@@ -374,7 +374,7 @@ class ExtendedKalmanFilter(Estimator):
         
         return np.array([distance, drone_phi])
 
-    def approx_A(self, x, u):
+    def A(self, x, u):
         """
         Approximate the Jacobian matrix A of the dynamics model at the current state.
         
@@ -400,7 +400,7 @@ class ExtendedKalmanFilter(Estimator):
         return A * self.dt
 
     
-    def approx_C(self, x):
+    def C(self, x):
         """
         Approximate the Jacobian matrix C of the measurement model at the current state.
         
@@ -416,7 +416,6 @@ class ExtendedKalmanFilter(Estimator):
         
         # landmark position
         landmark_x = self.landmark[0]
-        landmark_y = self.landmark[1]
         landmark_z = self.landmark[2]
         
         dx = landmark_x - drone_x

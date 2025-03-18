@@ -427,13 +427,196 @@ class ExtendedKalmanFilter(Estimator):
         super().__init__()
         self.canvas_title = 'Extended Kalman Filter'
         self.landmark = (0.5, 0.5)
-        # TODO: Your implementation goes here!
-        # You may define the Q, R, and P matrices below.
+
+        self.Q = np.array([
+            [0.1, 0, 0, 0, 0, 0],
+            [0, 0.001, 0, 0, 0, 0],
+            [0, 0, 0.001, 0, 0, 0],
+            [0, 0, 0, 0.001, 0, 0],
+            [0, 0, 0, 0, 0.001, 0],
+            [0, 0, 0, 0, 0, 0.001]
+        ])
+        
+        self.R = np.array([
+            [8, 0],
+            [0, 10]
+        ])
+        
+        self.P = np.array([
+            [0.1, 0, 0, 0, 0, 0],
+            [0, 0.001, 0, 0, 0, 0],
+            [0, 0, 0.001, 0, 0, 0],
+            [0, 0, 0, 0.001, 0, 0],
+            [0, 0, 0, 0, 0.001, 0],
+            [0, 0, 0, 0, 0, 0.001]
+        ])
+
 
     # noinspection DuplicatedCode
     def update(self, _):
         if len(self.x_hat) > 0 and self.x_hat[-1][0] < self.x[-1][0]:
-            # TODO: Your implementation goes here!
-            # You may use self.u, self.y, and self.x[0] for estimation
-            raise NotImplementedError
+            # Get the latest state estimate and time
+            last_state = self.x_hat[-1]
+            current_time = self.x[-1][0]
+            last_time = last_state[0]
+            dt = current_time - last_time
+            
+            # Get latest measurement
+            latest_y = None
+            for y_data in reversed(self.y):
+                if y_data[0] <= current_time:
+                    latest_y = y_data
+                    break
+            
+            # Get latest input
+            latest_u = None
+            for u_data in reversed(self.u):
+                if u_data[0] <= current_time:
+                    latest_u = u_data
+                    break
+            
+            if latest_y is None or latest_u is None:
+                self.x_hat.append(last_state)
+                return
+            
+            x_hat = np.array(last_state)
+            u = np.array(latest_u)
+            y = np.array(latest_y[1:3])
+            
+            # State extrapolation
+            x_pred = self.g(x_hat, u, dt)
+            
+            # dynamics linearization
+            A = self.A(x_hat, u, dt)
+            
+            # covariance extrapolation
+            P_pred = A @ self.P @ A.T + self.Q
+            
+            # Measurement linearization
+            C = self.C(x_pred)
+            
+            # Kalman gain
+            innovation = y - self.h(x_pred)
+            K = P_pred @ C.T @ np.linalg.inv(C @ P_pred @ C.T + self.R)
+            
+            # state update
+            x_updated = x_pred + K @ innovation
+            
+            # covariance update
+            I = np.eye(6)
+            self.P = (I - K @ C) @ P_pred
+            
+            # new state estimate
+            self.x_hat.append(x_updated)
+        
+    def g(self, state, u, dt):
+        """
+        Dynamics model function for the unicycle model.
+        
+        Parameters:
+        state : current state [time, phi, x, y, theta_L, theta_R]
+        u : control input [u_L, u_R]
+        dt : time step
+        
+        Returns:
+        The predicted next state using forward Euler integration
+        """
+        # state components
+        phi = state[1]
+        x_pos = state[2]
+        y_pos = state[3]
+        theta_L = state[4]
+        theta_R = state[5]
+        
+        # inputs
+        u_L = u[1]
+        u_R = u[2]
+        
+        # unicycle
+        new_phi = phi + (self.r / (2 * self.d)) * (u_R - u_L) * dt
+        new_x = x_pos + (self.r / 2) * (u_L + u_R) * np.cos(phi) * dt
+        new_y = y_pos + (self.r / 2) * (u_L + u_R) * np.sin(phi) * dt
+        new_theta_L = theta_L + u_L * dt
+        new_theta_R = theta_R + u_R * dt
+        
+        return np.array([state[0] + dt, new_phi, new_x, new_y, new_theta_L, new_theta_R])
+
+    def h(self, state):
+        """
+        Measurement model function.
+        
+        Parameters:
+        state : current state [time, phi, x, y, theta_L, theta_R]
+        
+        Returns:
+        The predicted measurement [distance to landmark, relative bearing]
+        """
+        x_pos = state[2]
+        y_pos = state[3]
+        phi = state[1]
+        
+        dx = self.landmark[0] - x_pos
+        dy = self.landmark[1] - y_pos
+        
+        distance = np.sqrt(dx**2 + dy**2)
+        dphi = np.arctan2(dy, dx) - phi
+            
+        return np.array([distance, dphi])
+    
+    def A(self, state, u, dt):
+        """
+        Compute the Jacobian of the dynamics model with respect to the state.
+        
+        Parameters:
+        state : current state [time, phi, x, y, theta_L, theta_R]
+        u : control input [u_L, u_R]
+        dt : time step
+        
+        Returns:
+        The linearized dynamics matrix A
+        """
+        phi = state[1]
+        u1 = u[1]
+        u2 = u[2]
+
+        A = np.array([[1, 0, 0, 0, 0, 0],
+                      [0, 1, 0, 0, 0, 0],
+                      [0, -(self.r / 2) * (u1 + u2) * np.sin(phi) * dt, 1, 0, 0, 0],
+                      [0, (self.r / 2) * (u1 + u2) * np.cos(phi) * dt, 0, 1, 0, 0],
+                      [0, 0, 0, 0, 1, 0],
+                      [0, 0, 0, 0, 0, 1]])
+        
+        return A
+    
+    def C(self, state):
+        """
+        Compute the Jacobian of the measurement model with respect to the state.
+        
+        Parameters:
+        state : current state [time, phi, x, y, theta_L, theta_R]
+        
+        Returns:
+        The linearized measurement matrix C
+        """
+        # Extract robot position and orientation
+        x_pos = state[2]
+        y_pos = state[3]
+        phi = state[1]
+        
+        # Calculate relative position to landmark
+        dx = self.landmark[0] - x_pos
+        dy = self.landmark[1] - y_pos
+        
+        # Calculate distance to landmark
+        dist_squared = dx**2 + dy**2
+        distance = np.sqrt(dist_squared)
+        
+        if dist_squared < 1e-10:
+            C = np.array([[0, 0, -1, 0, 0, 0, 0],
+                        [0, -1, 0, 0, 0, 0, 0]])
+        else:
+            C = np.array([[0, 0, -dx / distance, -dy / distance, 0, 0],
+                        [0, -1, dy / dist_squared, -dx / dist_squared, 0, 0]])
+        
+        return C
 
