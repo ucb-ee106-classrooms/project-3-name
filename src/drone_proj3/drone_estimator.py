@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
+import time
 plt.rcParams['font.family'] = ['Arial']
 plt.rcParams['font.size'] = 14
 
@@ -52,6 +53,8 @@ class Estimator:
     """
     # noinspection PyTypeChecker
     def __init__(self, is_noisy=False):
+        self.total_processing_time = 0
+        self.total_position_error = 0
         self.u = []
         self.x = []
         self.y = []
@@ -208,6 +211,9 @@ class DeadReckoning(Estimator):
 
     def update(self, _):
         if len(self.x_hat) > 0:
+            
+            start_time = time.time()
+
             last_state = self.x_hat[-1]
             
             # Last input
@@ -234,6 +240,26 @@ class DeadReckoning(Estimator):
             # New state estimate
             new_state = np.array([new_x, new_z, new_phi, new_vx, new_vz, new_omega])
             self.x_hat.append(new_state)
+
+            #calculate how much time it takes to process one step
+            total_time_per_step = (time.time() - start_time)
+            self.total_processing_time += total_time_per_step
+
+            #calculate the difference between true state and estimated states in meters (only using x and y)
+            true_x = self.x[-1][0]
+            true_z = self.x[-1][1]
+
+
+            print(len(self.x_hat))
+            position_error = np.sqrt((true_x - new_x) ** 2 + (true_z - new_z) ** 2)
+            self.total_position_error += position_error
+            print("distance: ", position_error)
+            print("average position error: ", self.total_position_error / ((len(self.x_hat)) - 1))
+            
+
+            print("Total processing time: ", self.total_processing_time)
+            print("average processing time per step: ", self.total_processing_time / (len(self.x_hat) - 1))
+
 
 # noinspection PyPep8Naming
 class ExtendedKalmanFilter(Estimator):
@@ -264,7 +290,9 @@ class ExtendedKalmanFilter(Estimator):
     def __init__(self, is_noisy=False):
         super().__init__(is_noisy)
         self.canvas_title = 'Extended Kalman Filter'
-
+        
+        
+        '''
         self.A = None
         self.B = None
         self.C = None
@@ -292,23 +320,33 @@ class ExtendedKalmanFilter(Estimator):
             [0, 0, 0, 0, 0, 0.1]
             ])
 
+        '''
+
+        self.Q = np.eye(6) * 0.1
+        self.R = np.eye(2) * 3
+        self.P = np.eye(6) * 2
+
     # noinspection DuplicatedCode
     def update(self, i):
-        if len(self.x_hat) > 0: #and self.x_hat[-1][0] < self.x[-1][0]:
+        if i < len(self.y): #and self.x_hat[-1][0] < self.x[-1][0]:
+            #print("i: ", i)
 
+            start_time = time.time()
+        
             # State extrapolation
             last_state = self.x_hat[-1]
-            u = self.u[i]
+            #print('last state: ', last_state)
+            u = self.u[i - 1]
             x_pred = self.g(last_state, u)
             
             # Dynamics linearization - compute Jacobian A
-            A = self.A(last_state, u)
+            A = self.approx_A(last_state, u)
             
             # Covariance extrapolation
             P_pred = A @ self.P @ A.T + self.Q
             
             # Measurement linearization - compute Jacobian C
-            C = self.C(x_pred)
+            C = self.approx_C(x_pred)
             
             # Kalman gain
             K = P_pred @ C.T @ np.linalg.inv(C @ P_pred @ C.T + self.R)
@@ -323,6 +361,29 @@ class ExtendedKalmanFilter(Estimator):
             # New state estimate
             self.x_hat.append(x_updated)
 
+            #i = i + 1
+
+            #calculate how much time it takes to process one step
+            total_time_per_step = (time.time() - start_time)
+            self.total_processing_time += total_time_per_step
+
+            #calculate the difference between true state and estimated states in meters (only using x and y)
+            true_x = self.x[-1][0]
+            true_z = self.x[-1][1]
+
+
+            print(len(self.x_hat))
+            position_error = np.sqrt((true_x - x_updated[0]) ** 2 + (true_z - x_updated[1]) ** 2)
+            self.total_position_error += position_error
+            print("distance: ", position_error)
+            print("average position error: ", self.total_position_error / ((len(self.x_hat)) - 1))
+            
+
+            print("Total processing time: ", self.total_processing_time)
+            print("average processing time per step: ", self.total_processing_time / (len(self.x_hat) - 1))
+
+
+
     def g(self, x, u):
         """
         Dynamics model function for the planar quadrotor.
@@ -336,19 +397,24 @@ class ExtendedKalmanFilter(Estimator):
         """
         A = np.array([x[3], x[4], x[5], 0, -self.gr, 0])
 
+        #A = self.approx_A(x, u)
+
         phi = x[2]
+
         B = np.array([[0, 0],
                     [0, 0],
                     [0, 0],
-                    [-np.sin(phi)/self.m, 0],
-                    [np.cos(phi)/self.m,  0],
-                    [0, 1/self.J]])
+                    [-np.sin(phi) / self.m, 0],
+                    [np.cos(phi) /self.m,  0],
+                    [0, 1 /self.J]])
+
+        f_x = A + B @ u 
         
-        x_dot = A + B @ u 
+        g = x + f_x * self.dt
         
-        x_new = x + x_dot * self.dt
+        #x_new = x + x_dot * self.dt
         
-        return x_new
+        return g
 
 
     def h(self, x):
@@ -361,6 +427,7 @@ class ExtendedKalmanFilter(Estimator):
         Returns:
         The predicted measurement [distance to landmark, bearing]
         """
+
         # drone state
         drone_x = x[0]
         drone_z = x[1]
@@ -368,13 +435,19 @@ class ExtendedKalmanFilter(Estimator):
         
         # landmark position
         landmark_x = self.landmark[0]
+        landmark_y = self.landmark[1]
         landmark_z = self.landmark[2]
-        
-        distance = np.sqrt((landmark_x - drone_x)**2 + (landmark_z - drone_z)**2)
+
+        dx = landmark_x - drone_x
+        dz = landmark_z - drone_z
+
+
+        distance = np.sqrt(dx ** 2 + landmark_y ** 2 + dz ** 2)
+
         
         return np.array([distance, drone_phi])
 
-    def A(self, x, u):
+    def approx_A(self, x, u):
         """
         Approximate the Jacobian matrix A of the dynamics model at the current state.
         
@@ -389,18 +462,18 @@ class ExtendedKalmanFilter(Estimator):
         u1 = u[0] # thrust force
         
         A = np.array([
-            [0, 0, 0, 1, 0, 0],
-            [0, 0, 0, 0, 1, 0],
-            [0, 0, 0, 0, 0, 1],
-            [0, 0, -u1 * np.cos(phi) / self.m, 0, 0, 0],
-            [0, 0, -u1 * np.sin(phi) / self.m, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0]
+            [1, 0, 0, self.dt, 0, 0],
+            [0, 1, 0, 0, self.dt, 0],
+            [0, 0, 1, 0, 0, self.dt],
+            [0, 0, -u1 * np.cos(phi) * self.dt/ self.m, 1, 0, 0],
+            [0, 0, -u1 * np.sin(phi) * self.dt/ self.m, 0, 1, 0],
+            [0, 0, 0, 0, 0, 1]
         ])
         
-        return A * self.dt
+        return A
 
     
-    def C(self, x):
+    def approx_C(self,x):
         """
         Approximate the Jacobian matrix C of the measurement model at the current state.
         
@@ -416,13 +489,15 @@ class ExtendedKalmanFilter(Estimator):
         
         # landmark position
         landmark_x = self.landmark[0]
+        landmark_y = self.landmark[1]
         landmark_z = self.landmark[2]
         
         dx = landmark_x - drone_x
         dz = landmark_z - drone_z
-        distance = np.sqrt(dx**2 + dz**2)
+
+        distance = np.sqrt(dx**2 + landmark_y ** 2 +  dz**2)
         
         C = np.array([[-dx / distance, -dz / distance, 0, 0, 0, 0],
                      [0, 0, 1, 0, 0, 0]])
         
-        return C * self.dt
+        return C

@@ -71,6 +71,8 @@ class Estimator:
     """
     # noinspection PyTypeChecker
     def __init__(self):
+        self.total_processing_time = 0
+        self.total_position_error = 0
         self.d = 0.08
         self.r = 0.033
         self.u = []
@@ -248,6 +250,10 @@ class DeadReckoning(Estimator):
 
     def update(self, _):
         if len(self.x_hat) > 0 and self.x_hat[-1][0] < self.x[-1][0]:
+    
+
+            start_time = rospy.Time.now()  # Get the current time
+            
             # Get the latest state estimate and time
             last_state = self.x_hat[-1]
             current_time = self.x[-1][0]
@@ -287,6 +293,27 @@ class DeadReckoning(Estimator):
             new_state = [current_time, new_phi, new_x, new_y, new_theta_L, new_theta_R]
             self.x_hat.append(new_state)
 
+            #calculate how much time it takes to process one step
+            total_time_per_step = (rospy.Time.now() - start_time).to_sec()
+            self.total_processing_time += total_time_per_step
+
+            #calculate the difference between true state and estimated states in meters (only using x and y)
+            true_x = self.x[-1][2]
+            true_y = self.x[-1][3]
+
+
+            print(len(self.x_hat))
+            position_error = np.sqrt((true_x - new_x) ** 2 + (true_y - new_y) ** 2)
+            self.total_position_error += position_error
+            print("distance: ", position_error)
+            print("average position error: ", self.total_position_error / ((len(self.x_hat)) - 1))
+            
+
+            print("Total processing time: ", self.total_processing_time)
+            print("average processing time per step: ", self.total_processing_time / (len(self.x_hat) - 1))
+
+
+
 
 class KalmanFilter(Estimator):
     """Kalman filter estimator.
@@ -314,6 +341,9 @@ class KalmanFilter(Estimator):
         super().__init__()
         self.canvas_title = 'Kalman Filter'
         self.phid = np.pi / 4
+
+
+
         
         # State: [x, y, theta_L, theta_R]
         self.A = np.eye(4)
@@ -350,10 +380,16 @@ class KalmanFilter(Estimator):
             [0, 0, 0, 0.1]
         ])
 
+        
+
     # noinspection DuplicatedCode
     # noinspection PyPep8Naming    
     def update(self, _):
         if len(self.x_hat) > 0 and self.x_hat[-1][0] < self.x[-1][0]:
+
+
+            start_time = rospy.Time.now()  # Get the current time
+
             last_state = self.x_hat[-1]
             current_time = self.x[-1][0]
             last_time = last_state[0]
@@ -394,6 +430,26 @@ class KalmanFilter(Estimator):
             # New state estimate
             new_state = [current_time, self.phid, x_new[0], x_new[1], x_new[2], x_new[3]]
             self.x_hat.append(new_state)
+
+            #calculate how much time it takes to process one step
+            total_time_per_step = (rospy.Time.now() - start_time).to_sec()
+            self.total_processing_time += total_time_per_step
+
+            #calculate the difference between true state and estimated states in meters (only using x and y)
+            true_x = self.x[-1][2]
+            true_y = self.x[-1][3]
+
+
+            print(len(self.x_hat))
+            position_error = np.sqrt((true_x -  x_new[0]) ** 2 + (true_y - x_new[1]) ** 2)
+            self.total_position_error += position_error
+            print("distance: ", position_error)
+            print("average position error: ", self.total_position_error / ((len(self.x_hat)) - 1))
+            
+
+            print("Total processing time: ", self.total_processing_time)
+            print("average processing time per step: ", self.total_processing_time / (len(self.x_hat) - 1))
+
 
 # noinspection PyPep8Naming
 class ExtendedKalmanFilter(Estimator):

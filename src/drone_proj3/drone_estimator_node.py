@@ -40,6 +40,7 @@ def main():
     -------
         None
     """
+    
     args = parser.parse_args()
     estimator_type = args.estimator
     if estimator_type == 'oracle':
